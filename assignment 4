@@ -1,1 +1,156 @@
 
+import csv
+from pathlib import Path
+
+
+class InvalidRecord(Exception):
+    pass
+
+
+def validate_record(line):
+    fields = [x.strip() for x in line.strip().split(",")]
+
+    if len(fields) != 5:
+        raise InvalidRecord("Invalid number of fields")
+
+    reg_no, name, department, email, event_text = fields
+
+    if not all([reg_no, name, department, email, event_text]):
+        raise InvalidRecord("Missing required field")
+
+    if email.count("@") != 1 or " " in email:
+        raise InvalidRecord("Invalid email")
+
+    local, domain = email.split("@")
+
+    if not local or "." not in domain:
+        raise InvalidRecord("Invalid email")
+
+    events = [e.strip() for e in event_text.split(";") if e.strip()]
+
+    if not events:
+        raise InvalidRecord("No event selected")
+
+    return {
+        "register_no": reg_no,
+        "name": name,
+        "department": department,
+        "email": email,
+        "events": events
+    }
+
+
+def process_files(input_files):
+    seen = set()
+    master = []
+    event_map = {}
+    errors = []
+
+    for filename in input_files:
+        try:
+            with open(filename, "r", encoding="utf-8") as file:
+
+                for line_no, line in enumerate(file, start=1):
+
+                    if not line.strip():
+                        continue
+
+                    try:
+                        record = validate_record(line)
+
+                        reg = record["register_no"]
+
+                        if reg in seen:
+                            raise InvalidRecord("Duplicate registration")
+
+                        seen.add(reg)
+                        master.append(record)
+
+                        for event in record["events"]:
+                            event_map.setdefault(event, []).append(record)
+
+                    except InvalidRecord as e:
+                        errors.append(
+                            (filename, line_no, str(e), line.strip())
+                        )
+
+        except (FileNotFoundError, PermissionError,
+                UnicodeDecodeError, OSError) as e:
+
+            errors.append((filename, 0, str(e), ""))
+
+    # Master registration file
+    with open("master.csv", "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Register No", "Name", "Department",
+                         "Email", "Events"])
+
+        for r in master:
+            writer.writerow([
+                r["register_no"], r["name"], r["department"],
+                r["email"], ";".join(r["events"])
+            ])
+
+    # Event participant files
+    for event, participants in event_map.items():
+
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_" else "_"
+            for c in event
+        )
+
+        with open(safe_name + "_participants.csv",
+                  "w", newline="", encoding="utf-8") as file:
+
+            writer = csv.writer(file)
+            writer.writerow(["Register No", "Name",
+                             "Department", "Email"])
+
+            for p in participants:
+                writer.writerow([
+                    p["register_no"], p["name"],
+                    p["department"], p["email"]
+                ])
+
+    # Summary report
+    with open("summary.txt", "w", encoding="utf-8") as file:
+        file.write("College Fest Registration Summary\n")
+        file.write(f"Accepted Registrations: {len(master)}\n")
+        file.write(f"Total Events: {len(event_map)}\n")
+
+        for event, participants in event_map.items():
+            file.write(
+                f"{event}: {len(participants)} participants\n"
+            )
+
+        file.write(f"Rejected Records: {len(errors)}\n")
+
+    # Error log
+    with open("error_log.csv", "w", newline="",
+              encoding="utf-8") as file:
+
+        writer = csv.writer(file)
+        writer.writerow([
+            "Filename", "Line Number", "Reason", "Original Line"
+        ])
+        writer.writerows(errors)
+
+    print("Registration processing completed!")
+    print("Accepted:", len(master))
+    print("Events:", len(event_map))
+    print("Errors:", len(errors))
+    print("Check the output files.")
+
+
+if __name__ == "__main__":
+
+    files = [
+        "department1.txt",
+        "department2.txt",
+        "department3.txt",
+        "department4.txt",
+        "department5.txt"
+    ]
+
+    process_files(files)
+
